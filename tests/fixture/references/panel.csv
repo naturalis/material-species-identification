@@ -1,0 +1,6 @@
+species,accession,role,use,expected_organism
+Homo sapiens,NC_012920.1,target,panel,
+Sus scrofa,NC_000845.1,target,panel,
+Bos taurus,NC_006853.1,congener,panel,
+Bos indicus,NC_005971.1,congener,panel,
+Ovis aries,NC_001941.1,relative,panel,

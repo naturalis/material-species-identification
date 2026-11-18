@@ -1,0 +1,38 @@
+# Your own configuration and generated sample sheet.
+config/config.yaml
+config/samples.tsv
+tests/fixture/samples.tsv
+tests/fixture/RunManifest.csv
+tests/fixture/reads/
+
+/resources/*
+!/resources/README.md
+!/resources/MANIFEST.tsv
+!/resources/panel/
+/resources/panel/*
+!/resources/panel/panel.tsv
+/results/
+/logs/
+.snakemake/
+__pycache__/
+tests/fixture/results/
+tests/fixture/logs/
+# haplogrep3 unpacks its bundled bwa JNI library into the working directory.
+/jbwa-data/
+
+# Sequencing data must never reach a remote.
+*.fastq
+*.fastq.gz
+*.fq
+*.fq.gz
+*.collapsed.gz
+*.truncated.gz
+*.bam
+*.sam
+*.cram
+*.blast.tsv
+*.blast.tsv.gz
+*.query.fasta
+*.unique.fasta.gz
+*.sai
+*.mapped.fasta.gz

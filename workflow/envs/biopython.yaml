@@ -1,0 +1,6 @@
+# Only for the barcode quality check: Biopython supplies the NCBI translation tables.
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - biopython=1.88

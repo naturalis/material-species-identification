@@ -1,0 +1,40 @@
+# Overlay on config/config.yaml: only what differs for the simulated fixture.
+#   tests/fixture/simulate_reads.py && snakemake --configfile tests/fixture/config.yaml
+# Rules and all thresholds are the production ones, apart from the bleed probe size.
+run_dir: tests/fixture
+fastq_dir: reads
+manifest: RunManifest.csv
+index_assignment: null        # no index-assignment file for a simulated run
+sample_sheet: tests/fixture/samples.tsv
+
+library_id_regex: '^DEMO_(.+?)_IDX_'
+roles:
+  sample-1: sample
+  sample-2: sample
+  blank-1: control
+gates:
+  gate1_blank: blank-1
+results_dir: tests/fixture/results
+logs_dir: tests/fixture/logs
+
+threads:
+  adapterremoval: 2
+  seqkit: 2
+  bleed_scan: 2
+  screen_unique: 2
+  blastn: 4
+  bwa: 2
+
+ingest:
+  md5: true                   # on here so the rule stays exercised
+
+bleed:
+  probe_reads: 20000
+
+references:
+  refseq_mito_fasta: tests/fixture/references/mito_subset.fasta
+  refseq_mito_blastdb: tests/fixture/results/blastdb/mito_subset
+  panel_csv: tests/fixture/references/panel.csv
+  panel_fasta: tests/fixture/references/panel.fasta
+  # Built by build_references.sh, not panel_fetch. Kept off the real panel table regardless.
+  panel_tsv: tests/fixture/results/panel/panel.tsv

@@ -1,0 +1,118 @@
+# Species identification from shotgun / genome-skimming reads. See README.md.
+#
+# Run from the repo root. Steps 0-2 are what `all` builds; steps 3-6 have their own
+# targets (`screen`, `mapping`, `authenticate`, `barcode`). contamMix and steps 7-8 are stubs
+# that fail if executed; `snakemake full_plan -n` shows the intended DAG.
+
+import re
+from pathlib import Path
+
+import pandas as pd
+
+
+configfile: "config/config.yaml"
+
+
+RESULTS = config["results_dir"]
+LOGS = config["logs_dir"]
+SCRIPTS = "workflow/scripts"
+
+if not Path(config["sample_sheet"]).exists():
+    raise WorkflowError(
+        f"{config['sample_sheet']} is missing. Generate it from the manifest with "
+        "workflow/scripts/make_sample_sheet.py, see README.md."
+    )
+
+SHEET = pd.read_csv(config["sample_sheet"], sep="\t").set_index("library", drop=False)
+
+# Controls go through the same per-library rules as samples but are never pooled with
+# them. Anything that aggregates across libraries must keep the role, or use SAMPLES.
+LIBRARIES = SHEET.index.tolist()
+SAMPLES = SHEET.index[SHEET["role"] == "sample"].tolist()
+CONTROLS = SHEET.index[SHEET["role"] == "control"].tolist()
+assert sorted(SAMPLES + CONTROLS) == sorted(LIBRARIES), "every library is sample or control"
+
+REFSEQ_DIR = str(Path(config["references"]["refseq_mito_taxonomy"]).parent)
+PANEL_DIR = str(Path(config["references"]["panel_tsv"]).parent)
+
+STUB = 'echo "rule {rule}: not implemented yet" >&2; exit 1'
+
+
+wildcard_constraints:
+    library="|".join(re.escape(library) for library in LIBRARIES),
+    source="|".join(re.escape(library) for library in SAMPLES),
+    control="|".join(re.escape(library) for library in CONTROLS),
+
+
+def merged_fastqs(library):
+    """Merged fragments of a library: AdapterRemoval's two collapsed outputs."""
+    prefix = f"{RESULTS}/01_preprocess/{library}/{library}"
+    return [f"{prefix}.collapsed.gz", f"{prefix}.collapsed.truncated.gz"]
+
+
+rule all:
+    input:
+        f"{RESULTS}/00_ingest/ingest_report.tsv",
+        f"{RESULTS}/00_ingest/md5_manifest.tsv" if config["ingest"]["md5"] else [],
+        f"{RESULTS}/01_preprocess/readstats.tsv",
+        f"{RESULTS}/01_preprocess/length_distributions.tsv",
+        f"{RESULTS}/01_preprocess/length_distributions.png",
+        f"{RESULTS}/02_controls/blank_profile.tsv",
+        f"{RESULTS}/02_controls/control_top_sequences.tsv",
+        f"{RESULTS}/02_controls/bleed_test.tsv",
+        f"{RESULTS}/02_controls/bleed_top_shared.tsv",
+
+
+# Step 3 at full depth. Not in `all`: it takes hours and needs `--sdm conda`.
+rule screen:
+    input:
+        f"{RESULTS}/03_screen/taxonomic_profile.tsv",
+        f"{RESULTS}/03_screen/gate1_evidence.tsv",
+
+
+# Step 4. Not in `all`: it needs step 3 and `--sdm conda`.
+rule mapping:
+    input:
+        f"{RESULTS}/04_mapping/per_reference_metrics.tsv",
+        f"{RESULTS}/04_mapping/ambiguity_bin.tsv",
+        f"{RESULTS}/04_mapping/coverage_tracks.png",
+
+
+# Step 5, as far as it goes before step 6 (contamMix needs the step 6 consensus).
+rule authenticate:
+    input:
+        f"{RESULTS}/05_auth/damage_summary.tsv",
+        f"{RESULTS}/05_auth/damage_by_taxon.png",
+        f"{RESULTS}/05_auth/length_by_taxon.tsv",
+        f"{RESULTS}/05_auth/length_by_taxon.png",
+        f"{RESULTS}/05_auth/complexity.tsv",
+        f"{RESULTS}/05_auth/background_test.tsv",
+        f"{RESULTS}/05_auth/background_test.png",
+
+
+# Step 6 for the taxa in config barcode.taxa. Not in `all`: it needs step 5 and `--sdm conda`.
+rule barcode:
+    input:
+        f"{RESULTS}/06_barcode/bold_summary.tsv",
+        f"{RESULTS}/06_barcode/coi_quality.tsv",
+        f"{RESULTS}/06_barcode/gene_coverage.png",
+        f"{RESULTS}/06_barcode/step6_summary.png",
+
+
+# The §11 deliverables. Not part of `all` until steps 3-8 exist.
+rule full_plan:
+    input:
+        rules.all.input,
+        f"{RESULTS}/report.md",
+
+
+include: "rules/references.smk"
+include: "rules/00_ingest.smk"
+include: "rules/01_preprocess.smk"
+include: "rules/02_controls.smk"
+include: "rules/03_screen.smk"
+include: "rules/04_mapping.smk"
+include: "rules/05_authentication.smk"
+include: "rules/06_barcode.smk"
+include: "rules/07_placement.smk"
+include: "rules/08_report.smk"

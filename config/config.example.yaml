@@ -1,0 +1,156 @@
+# Example configuration. Copy to config/config.yaml and edit the Run and Sample sheet
+# blocks for your data; the thresholds below are sensible defaults.
+# Relative paths are relative to the repo root; run snakemake from there.
+
+# --- Run -------------------------------------------------------------------------
+run_dir: /path/to/your/demultiplexed_run
+fastq_dir: samples_fastqs            # relative to run_dir
+manifest: RunManifest.csv            # relative to run_dir
+index_assignment: IndexAssignment.csv  # relative to run_dir; null to skip the yield cross-check
+
+sample_sheet: config/samples.tsv
+results_dir: results
+logs_dir: logs
+
+# --- Sample sheet ----------------------------------------------------------------
+# The manifest carries no role column, so roles are declared here against the short id
+# parsed from each library name. A manifest library with no entry is a hard error.
+# A regex with one capture group, pulling a short id out of each library name.
+library_id_regex: '^RUNID_(.+?)_INDEXKIT_'
+well_regex: '_([A-H][0-9]{2})$'
+non_libraries: [PhiX]
+# Every library in the manifest needs an entry here, or the run stops.
+# At least one control is required; it is the blank every number is reported against.
+roles:
+  sample-1: sample
+  sample-2: sample
+  blank-1: control
+
+# --- Compute (single box, leave it usable) ---------------------------------------
+# Whole-run ceilings are passed on the command line, see README.md.
+threads:
+  adapterremoval: 8
+  seqkit: 4
+  bleed_scan: 4
+  screen_unique: 8
+  blastn: 24
+  bwa: 16
+mem_mb:
+  default: 4000
+  control_profile: 16000
+  bleed_scan: 32000
+  screen_unique: 48000
+
+# --- Step 0: ingest --------------------------------------------------------------
+ingest:
+  md5: true
+
+# --- Step 1: preprocess ----------------------------------------------------------
+preprocess:
+  min_length: 25            # §6: min fragment length after merge
+  min_overlap: 11           # AdapterRemoval default
+  mismatch_rate: 3          # AdapterRemoval --mm; 3 means 1/3
+  quality_max: 50           # some platforms emit Q45; AdapterRemoval's default of 41 rejects those
+  # From the --identify-adapters consensus on the fixture: TruSeq-style, 10 Ns for the 10 nt
+  # indexes (the AdapterRemoval defaults assume 6 and 8). adapter2 stops where the reads
+  # leave the default sequence: they read ...GTATCAAG, the default ...GTATCATT.
+  adapter1: AGATCGGAAGAGCACACGTCTGAACTCCAGTCACNNNNNNNNNNATCTCGTATGCCGTCTTCTGCTTG
+  adapter2: AGATCGGAAGAGCGTCGTGTAGGGAAAGAGTGTNNNNNNNNNNGTGTAGATCTCGGTGGTCGCCGTATC
+  # An insert that is adapter-derived, on either strand. Kept as reads, but counted in the
+  # control profile and excluded from the bleed test: they are shared without any bleed.
+  adapter_motifs: [GATCGGAAGAGC, GCTCTTCCGATC]
+  read_length: 150          # for the merge ceiling on the length plot
+  seed: 20261030
+  # Control point: merge rate plausible, not ~0 and not ~100 %.
+  merge_rate_min: 0.02
+  merge_rate_max: 0.995
+
+# --- Step 2: controls ------------------------------------------------------------
+controls:
+  top_sequences: 100            # most abundant merged fragments listed per control
+  low_complexity_fraction: 0.8  # a read counts as low complexity at this share of one base
+bleed:
+  # Starting values, not calibrated. See workflow/scripts/bleed_scan.py for the estimator.
+  min_length: 35        # short fragments collide by chance
+  probe_reads: 1000000  # reads of each source used to measure its self-sharing
+  min_self_hits: 50     # below this the source baseline is too thin to call
+  min_expected_shared: 10   # shared reads a control must be expected to show at flag_fraction
+  flag_fraction: 0.10   # estimated share of a control from one source that gets it flagged
+  top_shared: 25        # shared sequences listed for inspection, per source
+  seed: 20261030
+
+# --- Gates (§6). Manual decisions, recorded in docs/decisions.md ------------------
+gates:
+  gate1_min_reads: 200
+  gate1_fold_over_blank: 5
+  gate1_blank: blank-1    # the id of the extraction blank
+  gate1_zero_count_limit: 3   # 95% upper limit on a Poisson count of zero
+  gate2_min_breadth: 0.05
+  gate2_min_depth: 1
+
+# --- Steps 3+ ---------------------------------------------------------------------
+references:
+  refseq_mito_url: https://ftp.ncbi.nlm.nih.gov/refseq/release/mitochondrion/
+  refseq_release_url: https://ftp.ncbi.nlm.nih.gov/refseq/release/RELEASE_NUMBER
+  refseq_mito_fasta: resources/refseq_mito/mitochondrion.fna
+  refseq_mito_taxonomy: resources/refseq_mito/mitochondrion.taxonomy.tsv
+  refseq_mito_blastdb: resources/refseq_mito/blastdb/mitochondrion
+  efetch_url: https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi
+  efetch_delay: 0.5         # seconds between requests; NCBI allows 3 per second without a key
+  panel_csv: config/reference_panel_mitogenomes.csv
+  panel_fasta: resources/panel/panel.fasta
+  panel_tsv: resources/panel/panel.tsv
+  bold_curated: resources/bold/latest
+  bold_uncurated: resources/bold/28-Aug-2026
+  bold_contaminants: resources/bold/contaminants
+mapping:
+  bwa_aln: "-l 1024 -n 0.01 -o 2"
+  panel_margin_mismatches: 2
+  min_mapq: 25              # on each genome alone, never on the combined panel (§6)
+  coverage_track_references: 9
+screen:
+  blastn_task: blastn
+  blastn_word_size: 16      # default 11; 13x faster on the fixture, strict counts unchanged
+  blastn_evalue: 1.0e-5
+  blastn_max_target_seqs: 100
+  strict_identity: 97       # percent identity
+  strict_coverage: 0.9      # share of the read aligned
+  # Records with non-mitochondrial sequence inside, kept out of the family table only.
+  # NC_021952.1 holds an Alu near 16 kb; NC_072975.1 holds Illumina adapter near 97.6 kb.
+  artefact_records: [NC_021952.1, NC_072975.1]
+authentication:
+  damage_positions: 25          # read positions profiled from each end
+  interior_positions: 10-25     # the baseline the terminal position is compared with
+  preseq_step: 1000000          # extrapolation step, in reads
+  # Taxa profiled, named as in the panel csv. Put your candidates first.
+  taxa: [Homo sapiens, Sus scrofa, Canis lupus, Gallus gallus, Felis catus, Bos taurus]
+barcode:
+  # Targets, by panel species name: the taxa that passed gate 2 and are worth a consensus.
+  taxa: [Homo sapiens, Sus scrofa]   # which taxa get a consensus; needs real coverage
+  consensus_min_depth: 3        # §6: masked below this depth
+  consensus_call_fraction: 0.7  # share of reads a base needs at a site, else N
+  gene: [COX1, COI, CO1, COXI]  # the barcode gene; the first name is the label
+  genetic_code: 2               # vertebrate mitochondrial
+  mixture_depth: 10             # sites this deep are tested for a minority allele
+  minor_fraction: 0.1           # second allele share that counts as a minority allele
+  phase_fraction: 0.2           # second allele share at which a site is split between two people
+  haplogroup_taxon: Homo sapiens
+  haplogroup_tree: phylotree-fu-rcrs@1.2   # PhyloTree 17 forensic update, shipped with haplogrep3
+  bold_curated_db: resources/bold/latest/BOLD_Public.09-Oct-2026.fasta
+  bold_uncurated_db: resources/bold/28-Aug-2026/BOLD_Public.28-Aug-2026.fasta
+  bold_max_target_seqs: 100
+  bold_barcode_standard: 487     # BOLD's formal barcode length, applied by hand (section 3b)
+  validator_min_length: 500      # barcode_validator's COI-5P default; see coi_quality.py
+  # Complete mitogenomes of a target species, plus its family from the local RefSeq release.
+  lineage:
+    Sus scrofa:
+      query: '"Sus scrofa"[Organism] AND mitochondrion[Filter] AND complete genome[Title] AND 15000:18000[SLEN]'
+      family: Suidae
+      cluster_distance: 0.01    # average-linkage cut, in substitutions per aligned site
+  # Reads simulated from the closest lineage genome, to measure recovery by length.
+  recovery_simulation:
+    min_length: 25
+    max_length: 290           # merged reads reach 289 bp
+    step: 5
+    per_length: 300
+    seed: 20261109
